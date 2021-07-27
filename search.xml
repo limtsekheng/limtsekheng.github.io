@@ -1,6 +1,67 @@
 <?xml version="1.0" encoding="utf-8"?>
 <search>
   <entry>
+    <title>DRIT model summary</title>
+    <url>/2021/07/27/DRIT/</url>
+    <content><![CDATA[<p><strong>Diverse Image-to-Image Translation via Disentangled Representations （DRIT)</strong><br><em>Hsin-Ying Lee, Hung-Yu Tseng, Jia-Bin Huang, Maneesh Singh, Ming-Hsuan Yang (ECCV2018)</em><br>The original paper is <a href="https://openaccess.thecvf.com/content_ECCV_2018/papers/Hsin-Ying_Lee_Diverse_Image-to-Image_Translation_ECCV_2018_paper.pdf">here</a>.<br>Official Github Repo is <a href="https://github.com/HsinYingLee/DRIT">here</a> under Python3.5-3.6, Pytorch0.4.0 and CUDA9<br>My modified version is <a href="https://github.com/limtsekheng/DRIT">here</a>, compatibale under Python3.7.10, Pytorch1.8.0 and CUDA11.0</p>
+<h3 id="Objectives"><a href="#Objectives" class="headerlink" title="Objectives"></a>Objectives</h3><ul>
+<li>Aim to disentangle content and attribute from images</li>
+<li>Use the disentangled representation for producing diverse outputs</li>
+</ul>
+<h3 id="Target"><a href="#Target" class="headerlink" title="Target"></a>Target</h3><ul>
+<li>Content space is shared among domains</li>
+<li>Attribute space encodes intra-domain variations</li>
+</ul>
+<p>To make content latent z<sup>c</sup><sub style='position: relative; left: -.4em;'>x</sub> and z<sup>c</sup><sub style='position: relative; left: -.4em;'>y</sub> share a same content space C:</p>
+<ul>
+<li>Share weight between the last layer of E<sup>c</sup><sub style='position: relative; left: -.4em;'>x</sub> and E<sup>c</sup><sub style='position: relative; left: -.4em;'>y</sub> and first layer of G<sub>x</sub> and G<sub>y</sub> so the higher level features will be mapped to same space (but still cannot guarantee the same content representations encode the same information for both domains</li>
+<li>Use content discriminator D<sup>c</sup> for adversarial training</li>
+</ul>
+<p><img src="/2021/07/27/DRIT/DRIT01.png" alt=""><br><img src="/2021/07/27/DRIT/DRIT02.png" alt=""></p>
+<h3 id="Loss-functions"><a href="#Loss-functions" class="headerlink" title="Loss functions"></a>Loss functions</h3><p><u> Content adversarial loss: </u></p>
+<ul>
+<li>To encourage content latent from x and y share a same content space C<br><img src="/2021/07/27/DRIT/DRIT03.png" alt=""></li>
+</ul>
+<p><u> Cross-cycle consistency loss </u></p>
+<ul>
+<li>Forward translation and backward translation</li>
+<li>To encourage the reconstruction after two Image-to-Image translations<br><img src="/2021/07/27/DRIT/DRIT04.png" alt=""></li>
+</ul>
+<p><u> Self-reconstruction loss: </u></p>
+<ul>
+<li>To facilitate the training of encoder and decoder in addition to the cross-cycle reconstruction</li>
+</ul>
+<p><u> Domain adversarial loss: </u></p>
+<ul>
+<li>Domain discriminator D<sub>x</sub> and D<sub>y</sub> attempt to discriminate between real images and generated images in each domain</li>
+<li>To encourage G<sub>x</sub> and G<sub>y</sub> to generate realistic images</li>
+</ul>
+<p><u> KL loss: </u></p>
+<ul>
+<li>To encourage the attribute representation to be close to a prior Gaussian distribution</li>
+<li>For easy sampling at test time</li>
+</ul>
+<p><u> Latent regression loss: </u></p>
+<ul>
+<li>To encourage the invertible mapping between the image and the attribute latent space</li>
+<li>Attempt to reconstruct the attribute representation drawn from the prior Gaussian distribution</li>
+</ul>
+<p><strong>Full objective function:</strong><br><img src="/2021/07/27/DRIT/DRIT05.png" alt=""></p>
+<h3 id="Code-implementation"><a href="#Code-implementation" class="headerlink" title="Code implementation"></a>Code implementation</h3><p>I have summarised the architecture of the official implementation together with the key variable names in following diagram.<br><img src="/2021/07/27/DRIT/DRIT06.png" alt=""></p>
+<p>The official released code is implemented under old Pytorch version and CUDA9, so if your GPU does not support CUDA9 and have no choice but to run using later Pytorch version, you most probably will encounter some Runtime Error related to in-place operations. The reason is that in old Pytorch versions (at least up to 0.4.0), node version mismatch between its forward and backward is not detected even though this should not be allowed. In later Pytorch version this issue is fixed and it will produce error explicitly. </p>
+<p>If we look at the original code in <code>model.py</code>, we can see that the second backward operation is performed straightly after the first backward and step operation. So when <code>self.backward_G_alone()</code> is performed it will detect that nodes along its propagation path have different versions compared to that in forward propagation time and in-place operation error pops up here.<br><figure class="highlight plaintext"><table><tr><td class="code"><pre><span class="line">def update_EG(self):</span><br><span class="line">  # update G, Ec, Ea</span><br><span class="line">  self.enc_c_opt.zero_grad()</span><br><span class="line">  self.enc_a_opt.zero_grad()</span><br><span class="line">  self.gen_opt.zero_grad()</span><br><span class="line">  self.backward_EG()		# first backward to obtain gradient values</span><br><span class="line">  self.enc_c_opt.step()	# update node values</span><br><span class="line">  self.enc_a_opt.step()	# update node values</span><br><span class="line">  self.gen_opt.step()		# update node values</span><br><span class="line"></span><br><span class="line">  # update G, Ec</span><br><span class="line">  self.enc_c_opt.zero_grad()</span><br><span class="line">  self.gen_opt.zero_grad()</span><br><span class="line">  self.backward_G_alone()		# another backward to obtain gradient values</span><br><span class="line">  self.enc_c_opt.step()</span><br><span class="line">  self.gen_opt.step()</span><br><span class="line"></span><br></pre></td></tr></table></figure></p>
+<p>The solution here is also simple, just bring the <code>self.backward_G_alone()</code> call before the step operation. You can refer to my folked repo with modified code <a href="https://github.com/limtsekheng/DRIT">here</a> also.<br><figure class="highlight plaintext"><table><tr><td class="code"><pre><span class="line">def update_EG(self):</span><br><span class="line">  # update G, Ec, Ea</span><br><span class="line">  self.enc_c_opt.zero_grad()</span><br><span class="line">  self.enc_a_opt.zero_grad()</span><br><span class="line">  self.gen_opt.zero_grad()</span><br><span class="line">  self.backward_EG()</span><br><span class="line">  self.backward_G_alone()   # backward_G_alone here to accumulate gradient together before update</span><br><span class="line">  self.enc_c_opt.step()</span><br><span class="line">  self.enc_a_opt.step()</span><br><span class="line">  self.gen_opt.step()</span><br></pre></td></tr></table></figure></p>
+<p>Results after 1200 epoches using cat2dog dataset:<br><img src="/2021/07/27/DRIT/DRIT07.jpeg" alt=""></p>
+]]></content>
+      <categories>
+        <category>Research paper reading</category>
+      </categories>
+      <tags>
+        <tag>disentanglement</tag>
+        <tag>deep learning</tag>
+      </tags>
+  </entry>
+  <entry>
     <title>NUS module review</title>
     <url>/2021/07/24/nus_module_review/</url>
     <content><![CDATA[<p><strong>Update:</strong> Module reviews for EE5904, EE5934 and EE4204 added on 27 July 2021.</p>
